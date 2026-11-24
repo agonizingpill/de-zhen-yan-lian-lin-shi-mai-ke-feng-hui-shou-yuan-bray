@@ -2,6 +2,16 @@
 
 给安澜社区演练的临时音控组记录各麦位和配线路由，比较同期声检摘要。音控复核员可保护多人同频线路，对独立异常麦位建隔离单并做备用路复测。
 
+## 多场地并发
+
+系统同时承载两个演练场（`SITE-A` 一号演练场、`SITE-B` 二号演练场），场地是所有数据的隔离边界：
+
+- 两场可重用同一套麦位编号、线路名（`BUS-A/B/C`）和声检刻度；同号声检窗、发现、隔离单在各自场内独立保存，互不覆盖。
+- 每个请求必须带场地请求头 `X-Venue-Code: SITE-A|SITE-B`；缺失或非法返回 `400`。值守在页面顶栏切换场地后，所有页面只拉取并显示本场记录。
+- 正常基线、同频诊断、备用路占用判定都只按本场数据计算；一条 `BUS` 在别场被占用不影响本场分配。
+- 计算凭证（Redis token）记录所属场地，别场凭证不能查看、签诊断或签复位（跨场使用返回 `403`）。
+- 旧单场地库升级时，历史数据统一归入原场 `SITE-A`，保留声检窗、发现、隔离单的对应关系；迁移与种子脚本均幂等，重跑不重复入档。
+
 ## 场景与人员
 
 模拟客户是一个五人社区活动音控组。原来用配线纸、共享表格和短时监听记录。三处常见困扰是同频共用麦位被误判为单点故障、临时改线影响其他路由、测试片段没有跟随新版线路。输入为演练声检查收表与归一化统计；输出交给音控值守和演练记录员核对。
@@ -48,6 +58,10 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 `backend/domain/learning.py` 从固定种子 217 的 32 个正常基线窗拟合 RobustScaler，再用 8 邻居的 novelty LOF 评估四项特征。读数为峰值频率占比、持续回响指数、整体声级、自身回路关联，范围均为 0 到 1。LOF 分数小于 −1.55 时尝试寻找同总线同刻度的相邻频率峰。在主峰偏差 25 Hz 内、峰占比至少 0.62 且回响至少 0.52 的麦位达到三个，即标记协作频带并保留。复线签发另外要求回响指数不高于 0.36。模型与阈值用于模拟声检样例。
 
-`soundboard.py` 与 `interventions.py` 定义领域表。`soundcheck.py` 记录声检和配线版本，`diagnose.py` 固定快照并检查迟到的同频证据，`channel.py` 保护共享路、隔离独立点并复位。前端位于 `frontend/src/pages/`。状态枚举在 `backend/domain/states.py` 与 `frontend/src/audio-state.js`，权限枚举在 `backend/core/roles.py`、`frontend/src/store.js`，使用于数据库约束、强制业务路径和显示。
+`soundboard.py` 与 `interventions.py` 定义领域表，所有业务表以 `(venue, code)` 为复合主键、唯一约束与外键也带 `venue`。`soundcheck.py` 记录声检和配线版本，`diagnose.py` 固定快照并检查迟到的同频证据，`channel.py` 保护共享路、隔离独立点并复位。场地枚举在 `domain/venues.py`，请求头依赖在 `core/venue_dep.py`，旧库升级在 `core/migrate.py`（应用启动时自动幂等执行）。前端位于 `frontend/src/pages/`，顶栏场地切换器与按场隔离的草稿状态分别在 `main.js` 与 `audio-state.js`。状态枚举在 `backend/domain/states.py` 与 `frontend/src/audio-state.js`，权限枚举在 `backend/core/roles.py`、`frontend/src/store.js`，使用于数据库约束、强制业务路径和显示。
+
+### 接口约定
+
+除 `/auth/login` 与 `/health` 外，所有接口都要求 `X-Venue-Code` 请求头。`GET /venues` 返回当前可选场地。计算结果轮询 `GET /compute/{token}` 也带场地头，跨场访问凭证返回 `403`。
 
 源码以 MIT 许可提供，见 `LICENSE`。

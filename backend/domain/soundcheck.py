@@ -6,14 +6,14 @@ from domain.soundboard import points,windows
 from domain.states import Patch
 
 
-def capture(form,user):
+def capture(form,user,venue):
     with transaction() as conn:
-        point=one(conn,points,form.point,lock=True)
+        point=one(conn,points,form.point,venue,lock=True)
         purpose="reline" if point["patch"]==Patch.ISOLATED else "live"
-        previous=latest(conn,point,purpose)
+        previous=latest(conn,venue,point,purpose)
         if previous and form.slot<=previous["slot"]:
             raise HTTPException(409,"本接线版本的声检窗时刻须递增")
-        conn.execute(windows.insert().values(**form.model_dump(),channel=point["channel"],
+        conn.execute(windows.insert().values(**form.model_dump(),venue=venue,channel=point["channel"],
                      revision=point["revision"],purpose=purpose))
-        record(conn,user,f"audio:{form.code}:{purpose}")
-        return one(conn,windows,form.code)
+        record(conn,user,venue,f"audio:{form.code}:{purpose}")
+        return one(conn,windows,form.code,venue)

@@ -8,35 +8,37 @@ from domain.soundboard import points,windows
 from domain.states import Patch
 
 
-def sound_snapshot(conn,focus):
-    return {"focus":focus,"baseline":calibration(conn),"simultaneous":same_slot(conn,focus)}
+def sound_snapshot(conn,venue,focus):
+    return {"focus":focus,"venue":venue,
+            "baseline":calibration(conn,venue),"simultaneous":same_slot(conn,venue,focus)}
 
 
-def diagnose(form,user):
+def diagnose(form,user,venue):
     with transaction() as conn:
-        focus=one(conn,windows,form.window)
-        point=one(conn,points,focus["point"])
+        focus=one(conn,windows,form.window,venue)
+        point=one(conn,points,focus["point"],venue)
         if focus["purpose"]!="live" or point["patch"]!=Patch.LIVE:
             raise HTTPException(409,"仅在播窗口用于判别；隔离后的试音须到复线页")
-        return submit(user,{"kind":"diagnosis",**sound_snapshot(conn,focus)})
+        return submit(user,venue,{"kind":"diagnosis",**sound_snapshot(conn,venue,focus)})
 
 
-def save(form,user):
-    computation=result(user,form.token)
+def save(form,user,venue):
+    computation=result(user,form.token,venue)
     captured=computation["input"]
     rating=computation["result"]
-    if captured["kind"]!="diagnosis":
-        raise HTTPException(409,"请使用原始诊断凭证签入发现")
+    if captured["kind"]!="diagnosis" or captured.get("venue")!=venue:
+        raise HTTPException(409,"请使用本场原始诊断凭证签入发现")
     focus=captured["focus"]
     with transaction() as conn:
-        point=one(conn,points,focus["point"],lock=True)
+        point=one(conn,points,focus["point"],venue,lock=True)
         if point["patch"]!=Patch.LIVE or point["revision"]!=focus["revision"]:
             raise HTTPException(409,"该声检窗口属于旧接线版本")
-        current=same_slot(conn,focus)
+        current=same_slot(conn,venue,focus)
         if {x["code"] for x in current}!={x["code"] for x in captured["simultaneous"]}:
             raise HTTPException(409,"同期同频证据有新增，请重新判别")
-        conn.execute(findings.insert().values(code=form.code,focus_window=focus["code"],category=rating["category"],
-                    score=rating["score"],neighbors=rating["neighbors"],shared_points=rating["shared_points"],
-                    reviewed_by=user["sub"],compute_token=form.token))
-        record(conn,user,f"finding:{form.code}:{rating['category']}")
-        return one(conn,findings,form.code)
+        conn.execute(findings.insert().values(venue=venue,code=form.code,focus_window=focus["code"],
+                    category=rating["category"],score=rating["score"],neighbors=rating["neighbors"],
+                    shared_points=rating["shared_points"],reviewed_by=user["sub"],
+                    compute_token=form.token))
+        record(conn,user,venue,f"finding:{form.code}:{rating['category']}")
+        return one(conn,findings,form.code,venue)

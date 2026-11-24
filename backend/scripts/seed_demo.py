@@ -9,7 +9,10 @@ def seed():
     with transaction() as conn:
         for table, rows in FIXTURES:
             for row in rows:
-                present = conn.scalar(select(table.c.code).where(table.c.code == row['code']))
+                # 复合主键 (venue, code) 判重：重跑只补缺，不重复入档。
+                present = conn.scalar(
+                    select(table.c.code).where(
+                        table.c.code == row['code'], table.c.venue == row['venue']))
                 if present is None:
                     conn.execute(table.insert().values(**row))
             sizes[table.name] = conn.scalar(select(func.count()).select_from(table))

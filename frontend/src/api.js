@@ -1,7 +1,7 @@
-import {session} from './store.js';
+import {session, venue} from './store.js';
 
 export async function request(path, data) {
-  const headers = {'Content-Type':'application/json'};
+  const headers = {'Content-Type':'application/json','X-Venue-Code':venue()};
   if (session()) headers.Authorization = 'Bearer ' + session().token;
   const response = await fetch('/api' + path, data === undefined ? {headers} :
     {method:'POST', headers, body:JSON.stringify(data)});
